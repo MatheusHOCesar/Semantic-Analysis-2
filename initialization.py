@@ -64,13 +64,11 @@ class InitializationAnalyzer:
         }
 
     def solve(self) -> InitializationFacts:
-        # Análise must: comece por uma aproximação superior, não pelo vazio.
-        # A transferência reinicia declarações e remove símbolos ao sair do
-        # escopo. O universo da função é um limite superior para os estados.
         facts = InitializationFacts(
             initialized_in={b: set(self.universe) for b in self.reachable},
             initialized_out={b: set(self.universe) for b in self.reachable},
         )
+        # Parâmetros de função sempre entram já inicializados
         facts.initialized_in[self.cfg.entry] = set(self.parameters)
 
         changed = True
@@ -81,19 +79,38 @@ class InitializationAnalyzer:
                     incoming = set(self.parameters)
                 else:
                     incoming = self._meet_predecessors(block_id, facts)
+                    
                 outgoing = transfer(self.cfg.blocks[block_id], incoming)
 
-                # TODO: compare incoming/outgoing com os estados anteriores.
-                # Grave os novos estados e sinalize changed quando houver
-                # alteração. A convergência depende dos conjuntos, não de um
-                # número fixo de passadas. Não emita erros neste laço.
-                raise NotImplementedError("implemente a atualização até ponto fixo")
+                # Verifica se houve mutações no estado IN
+                if incoming != facts.initialized_in[block_id]:
+                    facts.initialized_in[block_id] = set(incoming)
+                    changed = True
+                    
+                # Verifica se houve mutações no estado OUT
+                if outgoing != facts.initialized_out[block_id]:
+                    facts.initialized_out[block_id] = set(outgoing)
+                    changed = True
+
         return facts
 
     def _meet_predecessors(
         self, block_id: BlockId, facts: InitializationFacts,
     ) -> set[Symbol]:
         predecessors = self.cfg.blocks[block_id].predecessors & self.reachable
-        # TODO: interseção dos OUT destes predecessores. Não use união.
-        # Nunca modifique um conjunto OUT ao calcular a interseção.
-        raise NotImplementedError("implemente a junção de inicialização")
+        
+        if not predecessors:
+            return set()
+            
+        # garante a interseção iterativa sem modificar o OUT dos predecessores
+        pred_iterator = iter(predecessors)
+        first_pred = next(pred_iterator)
+        
+        # cria uma cópia do conjunto do primeiro predecessor alcançável
+        intersection_result = set(facts.initialized_out[first_pred])
+        
+        # intersecta com os restantes predecessores
+        for pred in pred_iterator:
+            intersection_result.intersection_update(facts.initialized_out[pred])
+            
+        return intersection_result
